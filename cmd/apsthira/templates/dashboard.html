@@ -539,14 +539,15 @@
         <!-- Left: Upload New Resume -->
         <div class="card">
             <h2>Create Resume Link</h2>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: -16px; margin-bottom: 20px;">Limit: 3 active links maximum</p>
             <div id="upload-alert" class="alert alert-danger"></div>
 
             <form id="upload-form">
                 <div class="form-group">
-                    <label for="slug">Custom Link Slug</label>
+                    <label for="slug">Custom Link Slug <span style="color: var(--text-muted); font-weight: 400;">(optional)</span></label>
                     <div class="input-wrapper">
                         <span class="prefix" id="slug-prefix">host/r/</span>
-                        <input type="text" id="slug" name="slug" class="form-control has-prefix" placeholder="johndoe" required pattern="^[a-zA-Z0-9-_]{3,30}$" title="3-30 characters, alphanumeric, dashes or underscores">
+                        <input type="text" id="slug" name="slug" class="form-control has-prefix" placeholder="leave blank for random" pattern="^[a-zA-Z0-9-_]{3,30}$" title="3-30 characters, alphanumeric, dashes or underscores">
                     </div>
                 </div>
 
@@ -602,6 +603,10 @@
             </div>
         </div>
     </div>
+
+    <footer style="text-align: center; padding: 24px; color: rgba(255, 255, 255, 0.25); font-size: 0.85rem; font-weight: 300; margin-top: 40px; z-index: 10;">
+        &copy; 2026 Apsthira. Securely hosted via Cloudflare R2 & Go. | <a href="https://github.com/libsib/apsthira" target="_blank" style="color: rgba(255,255,255,0.4); text-decoration: none; transition: color 0.2s;" onmouseover="this.style.color='#6366f1'" onmouseout="this.style.color='rgba(255,255,255,0.4)'">GitHub</a>
+    </footer>
 
     <!-- Delete Account Modal -->
     <div class="modal-overlay" id="delete-acc-modal-overlay">

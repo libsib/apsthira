@@ -31,5 +31,5 @@ if [ "$1" == "--prod" ]; then
 else
     # Development mode: compile and run on-the-fly
     echo -e "${BLUE}🚀 Starting Apsthira (Development Mode)...${NC}"
-    go run .
+    go run ./cmd/apsthira
 fi

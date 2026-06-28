@@ -1,0 +1,117 @@
+package main
+
+import (
+	"context"
+	"embed"
+	"html/template"
+	"log/slog"
+	"net/http"
+	"os"
+	"strings"
+
+	"github.com/exvillager/nanoserve"
+	"github.com/joho/godotenv"
+	"golang.org/x/time/rate"
+
+	"apsthira/internal/config"
+	"apsthira/internal/db"
+	"apsthira/internal/handler"
+	"apsthira/internal/logger"
+	"apsthira/internal/middleware"
+	"apsthira/internal/storage"
+)
+
+//go:embed templates/*
+var templatesFS embed.FS
+
+func main() {
+	logger.Init()
+	_ = godotenv.Load()
+
+	port := config.GetEnv("PORT", "8080")
+	dbConnStr := os.Getenv("DATABASE_URL")
+	if dbConnStr == "" {
+		dbConnStr = config.GetEnv("DB_PATH", "resumes.db")
+	}
+	isPostgres := strings.HasPrefix(dbConnStr, "postgres://") || strings.HasPrefix(dbConnStr, "postgresql://")
+
+	r2AccountID := os.Getenv("R2_ACCOUNT_ID")
+	r2AccessKeyID := os.Getenv("R2_ACCESS_KEY_ID")
+	r2SecretAccessKey := os.Getenv("R2_SECRET_ACCESS_KEY")
+	r2BucketName := os.Getenv("R2_BUCKET_NAME")
+
+	slog.Info("starting Apsthira")
+	if isPostgres {
+		slog.Info("config", "db", "PostgreSQL (URL masked)", "port", port)
+	} else {
+		slog.Info("config", "db", "SQLite", "db_path", dbConnStr, "port", port)
+	}
+	if r2AccountID == "" || r2AccessKeyID == "" || r2SecretAccessKey == "" || r2BucketName == "" {
+		slog.Warn("Cloudflare R2 credentials not fully set — file uploads and downloads will fail")
+	}
+
+	database, err := db.InitDB(dbConnStr)
+	if err != nil {
+		slog.Error("database initialization failed", "error", err)
+		os.Exit(1)
+	}
+	defer database.Close()
+	slog.Info("database connected", "engine", database.Driver())
+
+	var r2Client *storage.R2Client
+	if r2AccountID != "" {
+		ctx := context.Background()
+		r2Client, err = storage.InitR2(ctx, r2AccountID, r2AccessKeyID, r2SecretAccessKey, r2BucketName)
+		if err != nil {
+			slog.Error("R2 client initialization failed", "error", err)
+			os.Exit(1)
+		}
+	}
+
+	tmpl, err := template.ParseFS(templatesFS,
+		"templates/index.html",
+		"templates/login.html",
+		"templates/register.html",
+		"templates/dashboard.html",
+		"templates/view.html",
+	)
+	if err != nil {
+		slog.Error("template parsing failed", "error", err)
+		os.Exit(1)
+	}
+
+	h := handler.New(database, r2Client, tmpl)
+
+	r := nanoserve.New()
+	r.ErrorHandler = func(c *nanoserve.Context, err error) {
+		slog.Error("unhandled request error", "error", err)
+		c.Writer.Header().Set("Content-Type", "application/json")
+		c.Writer.WriteHeader(http.StatusInternalServerError)
+	}
+
+	r.Use(middleware.RequestLogger())
+	r.Use(middleware.RateLimit(middleware.NewIPRateLimiter(rate.Limit(15), 30)))
+
+	r.GET("/", h.LoadUser, h.HandleIndex)
+
+	r.GET("/login", h.LoadUser, h.HandleLoginGet)
+	r.POST("/login", h.LoadUser, h.HandleLoginPost)
+	r.GET("/register", h.LoadUser, h.HandleRegisterGet)
+	r.POST("/register", h.LoadUser, h.HandleRegisterPost)
+	r.POST("/logout", h.HandleLogoutPost)
+	r.POST("/delete-account", h.RequireAuth, h.HandleDeleteAccount)
+
+	r.GET("/dashboard", h.RequireAuth, h.HandleDashboardGet)
+	r.POST("/upload", h.RequireAuth, h.HandleUpload)
+	r.POST("/r/:slug/update", h.RequireAuth, h.HandleUpdateResume)
+	r.POST("/r/:slug/delete", h.RequireAuth, h.HandleDeleteResume)
+
+	r.GET("/r/:slug", h.HandleViewResume)
+	r.GET("/r/:slug/raw", h.HandleStreamResume)
+
+	slog.Info("server listening", "url", "http://localhost:"+port)
+	if err := r.Run(":" + port); err != nil {
+		slog.Error("server listen failed", "error", err)
+		os.Exit(1)
+	}
+}

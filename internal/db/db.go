@@ -1,4 +1,4 @@
-package main
+package db
 
 import (
 	"database/sql"
@@ -131,6 +131,10 @@ func (db *DB) Close() error {
 	return db.conn.Close()
 }
 
+func (db *DB) Driver() string {
+	return db.driver
+}
+
 // q replaces placeholder '?' with '$1, $2...' for PostgreSQL
 func (db *DB) q(query string) string {
 	if db.driver == "postgres" {
@@ -175,8 +179,8 @@ func (db *DB) GetUserByUsername(username string) (*User, error) {
 	query := db.q(`SELECT id, username, password_hash, created_at FROM users WHERE username = ?`)
 	row := db.conn.QueryRow(query, username)
 	var u User
-	var createdAtStr string
-	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &createdAtStr)
+	var createdAtVal any
+	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &createdAtVal)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
@@ -184,7 +188,7 @@ func (db *DB) GetUserByUsername(username string) (*User, error) {
 	}
 
 	// Parse timestamps
-	u.CreatedAt = db.parseTime(createdAtStr)
+	u.CreatedAt = db.parseTime(createdAtVal)
 	return &u, nil
 }
 
@@ -192,15 +196,15 @@ func (db *DB) GetUserByID(id int64) (*User, error) {
 	query := db.q(`SELECT id, username, password_hash, created_at FROM users WHERE id = ?`)
 	row := db.conn.QueryRow(query, id)
 	var u User
-	var createdAtStr string
-	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &createdAtStr)
+	var createdAtVal any
+	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &createdAtVal)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to scan user: %w", err)
 	}
 
-	u.CreatedAt = db.parseTime(createdAtStr)
+	u.CreatedAt = db.parseTime(createdAtVal)
 	return &u, nil
 }
 
@@ -218,16 +222,41 @@ func (db *DB) GetSession(token string) (*Session, error) {
 	query := db.q(`SELECT token, user_id, expires_at FROM sessions WHERE token = ?`)
 	row := db.conn.QueryRow(query, token)
 	var s Session
-	var expiresAtStr string
-	err := row.Scan(&s.Token, &s.UserID, &expiresAtStr)
+	var expiresAtVal any
+	err := row.Scan(&s.Token, &s.UserID, &expiresAtVal)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to scan session: %w", err)
 	}
 
-	s.ExpiresAt = db.parseTime(expiresAtStr)
+	s.ExpiresAt = db.parseTime(expiresAtVal)
 	return &s, nil
+}
+
+// GetSessionWithUser fetches session + user in a single JOIN instead of two queries.
+func (db *DB) GetSessionWithUser(token string) (*User, *Session, error) {
+	query := db.q(`
+	SELECT u.id, u.username, u.password_hash, u.created_at, s.expires_at
+	FROM sessions s
+	JOIN users u ON u.id = s.user_id
+	WHERE s.token = ?
+	`)
+	row := db.conn.QueryRow(query, token)
+	var u User
+	var s Session
+	var createdAtVal, expiresAtVal any
+	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &createdAtVal, &expiresAtVal)
+	if err == sql.ErrNoRows {
+		return nil, nil, nil
+	} else if err != nil {
+		return nil, nil, fmt.Errorf("failed to scan session+user: %w", err)
+	}
+	u.CreatedAt = db.parseTime(createdAtVal)
+	s.Token = token
+	s.UserID = u.ID
+	s.ExpiresAt = db.parseTime(expiresAtVal)
+	return &u, &s, nil
 }
 
 func (db *DB) DeleteSession(token string) error {
@@ -258,16 +287,16 @@ func (db *DB) GetResume(slug string) (*Resume, error) {
 	`)
 	row := db.conn.QueryRow(query, slug)
 	var r Resume
-	var createdAtStr, updatedAtStr string
-	err := row.Scan(&r.ID, &r.UserID, &r.Slug, &r.R2Key, &r.OriginalFilename, &createdAtStr, &updatedAtStr)
+	var createdAtVal, updatedAtVal any
+	err := row.Scan(&r.ID, &r.UserID, &r.Slug, &r.R2Key, &r.OriginalFilename, &createdAtVal, &updatedAtVal)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to query resume: %w", err)
 	}
 
-	r.CreatedAt = db.parseTime(createdAtStr)
-	r.UpdatedAt = db.parseTime(updatedAtStr)
+	r.CreatedAt = db.parseTime(createdAtVal)
+	r.UpdatedAt = db.parseTime(updatedAtVal)
 
 	return &r, nil
 }
@@ -288,14 +317,17 @@ func (db *DB) GetResumesByUserID(userID int64) ([]Resume, error) {
 	var list []Resume
 	for rows.Next() {
 		var r Resume
-		var createdAtStr, updatedAtStr string
-		err := rows.Scan(&r.ID, &r.UserID, &r.Slug, &r.R2Key, &r.OriginalFilename, &createdAtStr, &updatedAtStr)
+		var createdAtVal, updatedAtVal any
+		err := rows.Scan(&r.ID, &r.UserID, &r.Slug, &r.R2Key, &r.OriginalFilename, &createdAtVal, &updatedAtVal)
 		if err != nil {
 			return nil, err
 		}
-		r.CreatedAt = db.parseTime(createdAtStr)
-		r.UpdatedAt = db.parseTime(updatedAtStr)
+		r.CreatedAt = db.parseTime(createdAtVal)
+		r.UpdatedAt = db.parseTime(updatedAtVal)
 		list = append(list, r)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
 	}
 	return list, nil
 }
@@ -350,24 +382,44 @@ func (db *DB) DeleteUserAndResources(userID int64) error {
 	return tx.Commit()
 }
 
-// parseTime formats datetime string from SQLite or PostgreSQL driver formats safely
-func (db *DB) parseTime(tStr string) time.Time {
-	// Truncate timezone info if sent as standard SQL datetime string format
-	t, err := time.Parse(time.RFC3339, tStr)
-	if err == nil {
+// parseTime formats datetime string or direct time.Time from SQLite or PostgreSQL driver formats safely
+func (db *DB) parseTime(val any) time.Time {
+	if val == nil {
+		return time.Time{}
+	}
+	if t, ok := val.(time.Time); ok {
 		return t
 	}
+	var tStr string
+	if b, ok := val.([]byte); ok {
+		tStr = string(b)
+	} else if s, ok := val.(string); ok {
+		tStr = s
+	} else {
+		return time.Now()
+	}
+
+	tStr = strings.TrimSpace(tStr)
 	
-	// Fallback layouts
+	// Standard layouts
 	layouts := []string{
-		"2006-01-02T15:04:05Z",
-		"2006-01-02 15:04:05",
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05.999999999 -0700",
 		"2006-01-02 15:04:05.999999999-07:00",
 		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05.999999-07",
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02 15:04:05-0700",
+		"2006-01-02 15:04:05-07",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05",
 	}
+	
 	for _, layout := range layouts {
-		if val, err := time.Parse(layout, tStr); err == nil {
-			return val
+		if parsedVal, err := time.Parse(layout, tStr); err == nil {
+			return parsedVal
 		}
 	}
 	return time.Now() // default fallback

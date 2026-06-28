@@ -25,7 +25,7 @@ go vet ./...
 # -s: Omit symbols table (smaller binary size)
 # -w: Omit DWARF debugging info (smaller binary size)
 echo -e "${YELLOW}🚀 Compiling single binary...${NC}"
-go build -ldflags="-s -w" -o apsthira .
+go build -ldflags="-s -w" -o apsthira ./cmd/apsthira
 
 # Print file details
 if [ -f "./apsthira" ]; then

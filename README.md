@@ -1,6 +1,8 @@
 # Apsthira 📄🔗
 
 > **"Fluid resumes, permanent links. Securely host and update your CV via Cloudflare R2."**
+>
+> 🚀 *Made with Antigravity / Claude AI*
 
 Apsthira is a secure, lightweight, self-hosted web application built in Go that allows users to register accounts, upload PDF resumes, generate static links, and update or delete them from a central dashboard. 
 
@@ -29,10 +31,10 @@ The PDF resumes are stored in Cloudflare R2 storage and streamed securely throug
 
 ## Tech Stack
 
-- **Backend**: Go (using custom lightweight **nanoServe** router)
-- **Database**: SQLite3 (managed automatically, requires no setup)
-- **Storage**: Cloudflare R2 (S3-compatible)
-- **Frontend**: HTML5, Vanilla JS, CSS3 (glassmorphic dark theme)
+- **Backend**: Go (using lightweight **nanoServe** router)
+- **Database**: Postgres | SQLite3 (managed automatically, requires no setup)
+- **Storage**: Cloudflare R2
+- **Frontend**: HTML5, Vanilla JS, CSS
 
 ---
 
