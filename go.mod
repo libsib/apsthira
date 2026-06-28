@@ -28,6 +28,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.3 // indirect
 	github.com/aws/smithy-go v1.27.1 // indirect
 	github.com/exvillager/nanoserve v0.2.5 // indirect
+	github.com/lib/pq v1.12.3 // indirect
 	golang.org/x/time v0.15.0 // indirect
 )
 

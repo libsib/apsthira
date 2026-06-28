@@ -104,7 +104,13 @@ func main() {
 
 	// 1. Load Configurations
 	port := getEnv("PORT", "8080")
-	dbPath := getEnv("DB_PATH", "resumes.db")
+	dbConnStr := os.Getenv("DATABASE_URL")
+	isPostgres := false
+	if dbConnStr != "" {
+		isPostgres = true
+	} else {
+		dbConnStr = getEnv("DB_PATH", "resumes.db")
+	}
 
 	r2AccountID := os.Getenv("R2_ACCOUNT_ID")
 	r2AccessKeyID := os.Getenv("R2_ACCESS_KEY_ID")
@@ -112,20 +118,30 @@ func main() {
 	r2BucketName := os.Getenv("R2_BUCKET_NAME")
 
 	log.Printf("Starting Apsthira with Login Authentication (nanoServe router)...")
-	log.Printf("Config - DB Path: %s, Port: %s", dbPath, port)
+	if isPostgres {
+		log.Printf("Config - DB: PostgreSQL (URL masked), Port: %s", port)
+	} else {
+		log.Printf("Config - DB: SQLite (Path: %s), Port: %s", dbConnStr, port)
+	}
 	log.Printf("Config - R2 Bucket: %s, Account ID: %s", r2BucketName, r2AccountID)
 
 	if r2AccountID == "" || r2AccessKeyID == "" || r2SecretAccessKey == "" || r2BucketName == "" {
 		log.Println("WARNING: Cloudflare R2 credentials are not fully set. File uploads and downloads will fail.")
 	}
 
-	// 2. Initialize SQLite Database
+	// 2. Initialize Database (SQLite or PostgreSQL)
 	var err error
-	db, err = InitDB(dbPath)
+	db, err = InitDB(dbConnStr)
 	if err != nil {
 		log.Fatalf("Database initialization failed: %v", err)
 	}
 	defer db.Close()
+
+	dbEngine := "SQLite"
+	if db.driver == "postgres" {
+		dbEngine = "PostgreSQL"
+	}
+	log.Printf("Database connection established. Using %s engine.", dbEngine)
 
 	// 3. Initialize Cloudflare R2 Client
 	ctx := context.Background()
