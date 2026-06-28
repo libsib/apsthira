@@ -18,6 +18,7 @@ The PDF resumes are stored in Cloudflare R2 storage and streamed securely throug
 - **Static Preview Links**: Public links (e.g. `/r/johndoe`) are completely static and simplified—the update controls are removed from the viewer and kept entirely in the dashboard.
 - **Bcrypt Encryption**: User passwords are encrypted on creation using Bcrypt before being saved in SQLite.
 - **Secure R2 Streaming**: Resumes are served securely via `/r/johndoe/raw` by downloading from R2 on the server side, keeping R2 tokens and bucket names hidden.
+- **IP-Based Rate Limiting**: Protects the server and database from spam and brute-force hammering by enforcing an IP-based token-bucket rate limit (5 requests/sec, burst limit: 10) using `golang.org/x/time/rate` middleware.
 - **Strict PDF Inspection**:
   - File extension check (`.pdf`).
   - HTTP header content type verification (`application/pdf`).

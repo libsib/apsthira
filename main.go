@@ -9,20 +9,83 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/exvillager/nanoserve"
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/time/rate"
 )
 
 //go:embed templates/*
 var templatesFS embed.FS
+
+// IP-based Rate Limiter structures
+type ipRateLimiter struct {
+	ips map[string]*rate.Limiter
+	mu  sync.RWMutex
+	r   rate.Limit
+	b   int
+}
+
+func newIPRateLimiter(r rate.Limit, b int) *ipRateLimiter {
+	return &ipRateLimiter{
+		ips: make(map[string]*rate.Limiter),
+		r:   r,
+		b:   b,
+	}
+}
+
+func (i *ipRateLimiter) getLimiter(ip string) *rate.Limiter {
+	i.mu.RLock()
+	limiter, exists := i.ips[ip]
+	i.mu.RUnlock()
+
+	if !exists {
+		i.mu.Lock()
+		limiter, exists = i.ips[ip]
+		if !exists {
+			limiter = rate.NewLimiter(i.r, i.b)
+			i.ips[ip] = limiter
+		}
+		i.mu.Unlock()
+	}
+
+	return limiter
+}
+
+func rateLimitMiddleware(limiter *ipRateLimiter) nanoserve.HandlerFunction {
+	return func(c *nanoserve.Context) error {
+		ip, err := c.IP()
+		if err != nil {
+			ip = c.Request.RemoteAddr
+		}
+
+		if strings.Contains(ip, ":") {
+			host, _, err := net.SplitHostPort(ip)
+			if err == nil {
+				ip = host
+			}
+		}
+
+		l := limiter.getLimiter(ip)
+		if !l.Allow() {
+			c.Status(http.StatusTooManyRequests)
+			writeJSONError(c.Writer, http.StatusTooManyRequests, "Too many requests. Please try again later.")
+			c.Abort()
+			return nil
+		}
+
+		return c.Next()
+	}
+}
 
 var (
 	db        *DB
@@ -92,6 +155,10 @@ func main() {
 		log.Printf("Request error: %v", err)
 		writeJSONError(c.Writer, http.StatusInternalServerError, err.Error())
 	}
+
+	// Setup IP-based rate limiting (Limit: 5 req/sec, Burst: 10)
+	limiter := newIPRateLimiter(rate.Limit(5), 10)
+	r.Use(rateLimitMiddleware(limiter))
 
 	// Router mappings
 	r.GET("/", handleIndex)
@@ -228,7 +295,7 @@ func handleLoginPost(c *nanoserve.Context) error {
 
 	// Create session
 	token := generateSessionToken()
-	expires := time.Now().Add(24 * time.Hour) // 1 day session
+	expires := time.Now().Add(30 * time.Minute) // 30-minute short session
 	err = db.CreateSession(token, user.ID, expires)
 	if err != nil {
 		log.Printf("Session creation error: %v", err)
@@ -323,7 +390,7 @@ func handleRegisterPost(c *nanoserve.Context) error {
 
 	// Auto-login after registration
 	token := generateSessionToken()
-	expires := time.Now().Add(24 * time.Hour)
+	expires := time.Now().Add(30 * time.Minute)
 	_ = db.CreateSession(token, userID, expires)
 
 	c.SetCookie(http.Cookie{
